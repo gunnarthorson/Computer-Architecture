@@ -1,56 +1,46 @@
 """CPU functionality."""
-import re
+
 import sys
+
+LDI = 0b10000010
+HLT = 0b00000001
+PRN = 0b01000111
+MUL = 0b10100010
+POP = 0b01000110
+PUSH = 0b01000101
 
 class CPU:
     """Main CPU class."""
 
     def __init__(self):
         """Construct a new CPU."""
-        self.reg = [0] * 8 # Variablesfor cpu to use with instructions
-        self.ram = [None] * 256 # memory slots to keep track of variables
-        self.pc = 0 # pointer to track operations in register
+        self.ram = [0] * 256
+        self.reg = [0] * 8
+        self.pc = 0
         self.running = True
+        self.sp = len(self.reg) - 1
 
-    def ram_read(self, MAR): # Memory Address Register
-        # get the value at ram address
-        return self.ram[MAR]
-    
-    def ram_write(self, MAR, MDR): # Memory Data Register
-        # write over a specified address in ram
-        self.ram[MAR] = MDR
-        print(f"Address: {MAR} = {MDR}")
+    def ram_read(self, value):
+        return self.ram[value]
 
-    def load(self, argument):
-        """Load a program into memory.
-        Bonus: check to make sure the user has put a command line argument
-         where you expect, and print an error and exit if they didn’t."""
+    def ram_write(self, value, register):
+        self.ram[value] = register
 
 
-        # # For now, we've just hardcoded a program:
+    def load(self):
+        """Load a program into memory."""
 
-        # program = [
-        #     # From print8.ls8
-        #     0b10000010, # LDI R0,8
-        #     0b00000000,
-        #     0b00001000,
-        #     0b01000111, # PRN R0
-        #     0b00000000,
-        #     0b00000001, # HLT
-        # ]
-        try:
-            with open(argument, "r") as f:
-               program = f.read()
+        filename = sys.argv[1]
 
-            instructions = re.findall(r'\d{8}', program) # match first block of numbers
-            for address, instruction in enumerate(instructions):
-                x = int(instruction, 2)  # Convert binary string to integer
-                self.ram[address] = x
 
-                #    if instruction[0].isdigit():
-                #         line = instruction.split("#")
-        except FileNotFoundError:
-            print("Error with file from command line")
+        with open(filename) as files:
+            for address, line in enumerate(files):
+                line = line.split("#")
+                try:
+                    v = int(line[0], 2)
+                except ValueError:
+                    continue
+                self.ram_write(address, v)
 
 
     def alu(self, op, reg_a, reg_b):
@@ -58,11 +48,9 @@ class CPU:
 
         if op == "ADD":
             self.reg[reg_a] += self.reg[reg_b]
-        elif op == "SUB":
-            self.reg[reg_a] += -self.reg[reg_b]
+            # added the option for multiplication
         elif op == "MUL":
-            product = self.reg[reg_a] * self.reg[reg_b]
-            self.reg[reg_a] = product
+            self.reg[reg_a] *= self.reg[reg_b]
         else:
             raise Exception("Unsupported ALU operation")
 
@@ -86,43 +74,62 @@ class CPU:
 
         print()
 
+    def LDI(self):
+        operand_a = self.ram_read(self.pc + 1)
+        operand_b = self.ram_read(self.pc + 2)
+
+        self.reg[operand_a] = operand_b
+
+        self.pc += 3
+
+    def PRN(self):
+        operand_a = self.ram_read(self.pc + 1)
+        print(self.reg[operand_a])
+
+        self.pc += 2
+
+    def HLT(self):
+        self.running = False
+    
+    def MUL(self):
+        operand_a = self.ram_read(self.pc + 1)
+        operand_b = self.ram_read(self.pc + 2)
+
+        self.alu("MUL", operand_a, operand_b)
+
+        self.pc += 3
+
+    def POP(self):
+        self.reg[self.ram[self.pc + 1]] = self.reg[self.sp]
+        self.sp += 1
+        self.pc += 2
+
+    def PUSH(self):
+        self.sp -= 1
+        self.reg[self.sp] = self.reg[self.ram[self.pc + 1]]
+        self.pc += 2
+
+    def call_function(self, n):
+        branch_table = {
+            LDI : self.LDI,
+            PRN : self.PRN,
+            HLT : self.HLT,
+            MUL : self.MUL,
+            POP : self.POP,
+            PUSH : self.PUSH
+        }
+
+        files = branch_table[n]
+
+        if branch_table.get(n) is not None:
+            files()
+        else:
+            print(f"Unknown instruction {n}")
+            sys.exit(1)
+
     def run(self):
         """Run the CPU."""
-        """
-        10000010 # LDI R0,8
-        00000000
-        00001000
-        01000111 # PRN R0
-        00000000
-        00000001 # HLT
-        """
-        # should be similar to lecture
-        LDI = 0b10000010 # These are instructions we need to translate
-        PRN = 0b01000111
-        HLT = 0b00000001
-        MUL = 0b10100010
-
-
+        # While true
         while self.running:
-            IR = self.ram_read(self.pc) # Instruction Register
-            operand_a = self.ram_read(self.pc + 1)
-            operand_b = self.ram_read(self.pc + 2)
-            # print(self.reg)
-            if IR == HLT:
-                self.running = False
-
-            elif IR == LDI: # next value is the pc, one after is the value to set register to
-               self.reg[operand_a] = operand_b
-               self.pc += 3
-               
-
-            elif IR == PRN: # psuedo instr. Print value stored at register
-                print(self.reg[operand_a])
-                self.pc += 2
-            
-            elif IR == MUL: # multiply the next two
-               self.alu("MUL", operand_a, operand_b)
-               self.pc += 3
-
-            else:
-                print(f"This is out of control")
+            IR = self.ram_read(self.pc)
+            self.call_function(IR)
